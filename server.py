@@ -37,7 +37,8 @@ def index():
 @app.get("/api/state")
 def state():
     files = sorted(f for f in os.listdir(DATA_DIR) if not f.startswith("."))
-    return jsonify(datasets=files, runs=[summary(r) for r in RUNS.values()], model=agent.MODEL, advisor=agent.ADVISOR, effort=agent.EFFORT)
+    return jsonify(datasets=files, runs=[summary(r) for r in RUNS.values()], model=agent.MODEL, advisor=agent.ADVISOR, effort=agent.EFFORT,
+                   prices=agent.PRICES)
 
 
 @app.post("/api/ask")

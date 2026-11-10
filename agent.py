@@ -9,6 +9,9 @@ EFFORT = os.environ.get("AGENT_EFFORT", "high")
 MEMORY_DIR = os.environ.get("MEMORY_DIR", "./ds_memories")
 TRACE_DIR = os.environ.get("TRACE_DIR", "./traces")
 
+# USD per million tokens (input, output). Tokens only: sandbox container time is not included.
+PRICES = {"claude-sonnet-5-5": (2.0, 10.0), "claude-opus-5-5": (4.0, 20.0)}
+
 SYSTEM = """You are a senior data scientist. The user's dataset is mounted in the sandbox at $INPUT_DIR.
 
 How you work:

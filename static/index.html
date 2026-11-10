@@ -94,6 +94,8 @@ pre.err{color:var(--accent)}
 .errbox{border:1px solid var(--accent);border-radius:6px;padding:9px 12px;color:var(--accent);font:13px var(--mono);white-space:pre-wrap;word-break:break-word}
 .strip a.new{outline:2px solid var(--ink);outline-offset:1px}
 [hidden]{display:none!important}
+.tile.cost{border-color:var(--accent);border-width:2px;grid-column:span 2}
+.tile.cost b{color:var(--accent);font-size:26px}
 </style>
 </head>
 <body>
@@ -184,7 +186,15 @@ function stepHTML(e, n){
 const $ = id => document.getElementById(id);
 let PASS = ''; try { PASS = localStorage.getItem('ds_pass') || ''; } catch(e){}
 let STATE = {runs:[], datasets:[]}, CUR = null, RUN = null, painted = 0, timer = null;
-const IDEAS = ['Profile this dataset and tell me the 3 most interesting things', 'Did the treatment win? Should we ship it?', 'What drives conversion? Rank the factors', 'Find anything suspicious in this data'];
+const IDEAS = ['Profile this dataset and tell me the 3 most interesting things', 'What best predicts the main outcome? Rank the factors', 'Show me the most surprising pattern in one chart', 'Find anything suspicious in this data'];
+
+function costOf(Q){                    // dollars from per-model token counts; null if a model has no known price
+  let c = 0, unknown = false;
+  (Q || []).forEach(q => (q.per_model && q.per_model.length ? q.per_model : [{model: RUN && RUN.model, in: q.in, out: q.out}]).forEach(m => {
+    const p = (STATE.prices || {})[m.model]; if(!p){ unknown = true; return; } c += m.in / 1e6 * p[0] + m.out / 1e6 * p[1]; }));
+  return {c, unknown};
+}
+const usd = c => '$' + (c < 0.995 ? c.toFixed(3) : c.toFixed(2));
 
 async function api(path, opts = {}){
   const r = await fetch(path, {...opts, headers: {...(opts.headers || {}), 'X-Passcode': PASS}});
@@ -235,17 +245,18 @@ function paint(){
   const texts = E.filter(e => e.kind === 'text'); const final = !live ? texts[texts.length - 1] : null;
   const memRead = E.some(e => e.kind === 'memory' && e.input.command === 'view' && /\.md/.test(e.input.path || ''));
   $('head').innerHTML = `<h1>${esc(r.question)}</h1><div class="meta" style="margin-top:8px"><span class="chip">${esc(r.dataset)} · ${num(r.rows)} rows</span><span class="chip">${esc(r.model)}</span><span class="chip">advisor ${esc(r.advisor)}</span><span class="chip">effort ${esc(r.effort)}</span><span class="chip">${esc(r.started)}</span>${r.followup ? '<span class="chip">follow-up, same sandbox</span>' : ''}${memRead ? '<span class="chip">read memory from an earlier run</span>' : ''}</div>`;
-  $('status').innerHTML = live ? `<div class="live"><span class="dot"></span><span>${esc(r.activity || 'working')} · step ${E.length} · ${Math.round(r.elapsed || 0)}s</span></div>` : r.status === 'error' ? `<div class="errbox">The run stopped with an error.\n${esc(r.error)}</div>` : '';
+  $('status').innerHTML = live ? `<div class="live"><span class="dot"></span><span>${esc(r.activity || 'working')} · step ${E.length} · ${Math.round(r.elapsed || 0)}s · ${usd(costOf(Q).c)} so far</span></div>` : r.status === 'error' ? `<div class="errbox">The run stopped with an error.\n${esc(r.error)}</div>` : '';
   $('strip').innerHTML = E.map((e,i) => `<a href="#s${i+1}" data-s="${i+1}" class="${live && i === E.length-1 ? 'new' : ''}" title="${i+1} ${(KIND[e.kind]||[e.kind])[0]}" aria-label="Step ${i+1} ${(KIND[e.kind]||[e.kind])[0]}" style="background:var(${(KIND[e.kind]||['','--out'])[1]})"></a>`).join('') || '<span style="color:var(--mute);font-size:12px">No steps yet</span>';
   document.querySelectorAll('#strip a').forEach(a => a.onclick = ev => { ev.preventDefault(); const d = $('s' + a.dataset.s); if(!d) return; d.open = true; d.scrollIntoView({behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block:'start'}); });
   $('legend').innerHTML = `<span><i style="background:var(--code)"></i>code ${count('code')}</span><span><i style="background:var(--out)"></i>output ${count('output')}</span><span><i style="background:var(--adv)"></i>advisor ${count('advisor_call')}</span><span><i style="background:var(--mem)"></i>memory ${count('memory')}</span><span><i style="background:var(--txt)"></i>agent text ${count('text')}</span>`;
-  $('tiles').innerHTML = [[Math.round(r.elapsed || 0) + 's','total time'],[Q.length + (live ? '+' : ''),'API requests'],[count('code'),'code steps'],[count('advisor_call'),'advisor calls'],[count('memory'),'memory ops'],[num(tin),'input tokens'],[num(tout),'output tokens']].map(([b,s]) => `<div class="tile"><b>${b}</b><span>${s}</span></div>`).join('');
+  const cost = costOf(Q);
+  $('tiles').innerHTML = `<div class="tile cost"><b>${usd(cost.c)}${live ? '+' : ''}</b><span>cost of this run${cost.unknown ? ' (some prices unknown)' : ''}</span></div>` + [[Math.round(r.elapsed || 0) + 's','total time'],[Q.length + (live ? '+' : ''),'API requests'],[count('code'),'code steps'],[count('advisor_call'),'advisor calls'],[count('memory'),'memory ops'],[num(tin),'input tokens'],[num(tout),'output tokens']].map(([b,s]) => `<div class="tile"><b>${b}</b><span>${s}</span></div>`).join('');
   const ch = chart ? `<section><h2>Chart the agent made · ${esc(chart.name)}</h2><img alt="Chart made by the agent" src="data:image/png;base64,${chart.b64}"></section>` : '';
   if($('chart').dataset.k !== (chart ? chart.name + chart.b64.length : '')){ $('chart').innerHTML = ch; $('chart').dataset.k = chart ? chart.name + chart.b64.length : ''; }
   $('answer').innerHTML = final ? `<section><h2>Final answer</h2><div class="answer md">${md(final.text)}</div></section>` : '';
   const byModel = {}; Q.forEach(q => (q.per_model || []).forEach(m => { byModel[m.model] = byModel[m.model] || {in:0,out:0}; byModel[m.model].in += m.in; byModel[m.model].out += m.out; }));
   const maxTok = Math.max(1, ...Q.map(q => q.in + q.out));
-  $('tokens').innerHTML = Q.length ? `<section><h2>Tokens per API request (grey input, red output)</h2><div class="req">${Q.map((q,i) => `<span>#${i+1}</span><div style="display:flex;align-items:center"><div class="bar" style="width:${Math.max(4,(q.in+q.out)/maxTok*50)}%"><i class="in" style="flex:${q.in}"></i><i class="o" style="flex:${Math.max(q.out,1)}"></i></div><span class="barlab">${num(q.in)} / ${num(q.out)} · ${q.secs}s</span></div>`).join('')}</div>${Object.keys(byModel).length ? `<div class="scroll" style="margin-top:10px"><table><thead><tr><th>Billed model</th><th>Input</th><th>Output</th></tr></thead><tbody>${Object.entries(byModel).map(([m,v]) => `<tr><td>${esc(m)}</td><td>${num(v.in)}</td><td>${num(v.out)}</td></tr>`).join('')}</tbody></table></div>` : ''}</section>` : '';
+  $('tokens').innerHTML = Q.length ? `<section><h2>Tokens per API request (grey input, red output, cost)</h2><div class="req">${Q.map((q,i) => `<span>#${i+1}</span><div style="display:flex;align-items:center"><div class="bar" style="width:${Math.max(4,(q.in+q.out)/maxTok*50)}%"><i class="in" style="flex:${q.in}"></i><i class="o" style="flex:${Math.max(q.out,1)}"></i></div><span class="barlab">${num(q.in)} / ${num(q.out)} · ${q.secs}s · ${usd(costOf([q]).c)}</span></div>`).join('')}</div>${Object.keys(byModel).length ? `<div class="scroll" style="margin-top:10px"><table><thead><tr><th>Billed model</th><th>Input</th><th>Output</th><th>$/M in, out</th><th>Cost</th></tr></thead><tbody>${Object.entries(byModel).map(([m,v]) => `<tr><td>${esc(m)}</td><td>${num(v.in)}</td><td>${num(v.out)}</td><td>${(STATE.prices||{})[m] ? '$' + STATE.prices[m][0] + ', $' + STATE.prices[m][1] : 'unknown'}</td><td>${(STATE.prices||{})[m] ? usd(v.in/1e6*STATE.prices[m][0] + v.out/1e6*STATE.prices[m][1]) : ''}</td></tr>`).join('')}<tr><th>Total (tokens only)</th><th>${num(Object.values(byModel).reduce((a,v)=>a+v.in,0))}</th><th>${num(Object.values(byModel).reduce((a,v)=>a+v.out,0))}</th><th></th><th>${usd(cost.c)}</th></tr></tbody></table></div>` : ''}</section>` : '';
   const mems = r.memory_files || {};
   $('mem').innerHTML = Object.keys(mems).length ? `<section><h2>Memory on disk</h2>${Object.entries(mems).map(([p,t]) => `<details class="step" style="--k:var(--mem);margin-bottom:6px"><summary><span class="k">Memory file</span><span class="h">${esc(p)}</span></summary><div class="body md">${md(t || '')}</div></details>`).join('')}</section>` : '';
   $('tracehead').textContent = `Full trace · ${E.length} steps`;
