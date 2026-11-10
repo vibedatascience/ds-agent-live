@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data Science Agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* layout idea: one column, summary first (strip + tiles + chart + answer), then the full step-by-step trace */
+:root{
+  --bg:#ffffff; --panel:#f6f7f9; --ink:#14181f; --mute:#667085; --line:#e3e6eb;
+  --code:#5b6fd0; --out:#64748b; --adv:#8b5fd6; --mem:#7f8f3f; --txt:#c2410c; --accent:#E60023;
+  --sans:"IBM Plex Sans",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0f1216; --panel:#181c22; --ink:#e8ebf0; --mute:#98a2b3; --line:#2a303a;
+  --code:#8b9bf0; --out:#94a3b8; --adv:#b392f0; --mem:#b3c26a; --txt:#fb923c; --accent:#ff4d63; color-scheme:dark; } }
+:root[data-theme="dark"]{
+  --bg:#0f1216; --panel:#181c22; --ink:#e8ebf0; --mute:#98a2b3; --line:#2a303a;
+  --code:#8b9bf0; --out:#94a3b8; --adv:#b392f0; --mem:#b3c26a; --txt:#fb923c; --accent:#ff4d63; color-scheme:dark; }
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.45 var(--sans);padding:12px 16px 60px}
+main{max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+h1{font-size:17px;font-weight:600;margin:0;text-wrap:balance}
+h2{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--mute);margin:0 0 6px}
+.mono,pre,code{font-family:var(--mono)}
+.runs{display:flex;gap:6px;flex-wrap:wrap}
+.runs button{font:500 12px var(--sans);padding:7px 10px;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:6px;cursor:pointer;text-align:left;max-width:100%}
+.runs button[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 -2px 0 var(--accent)}
+.runs button:focus-visible,.step summary:focus-visible,.strip a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.meta{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font:12px var(--mono);padding:3px 7px;border-radius:4px;background:var(--panel);border:1px solid var(--line)}
+.strip{display:flex;gap:2px;height:38px}
+.strip a{flex:1;min-width:6px;border-radius:3px;display:block}
+.legend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12px;color:var(--mute);margin-top:6px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:8px}
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px 10px}
+.tile b{display:block;font:500 20px var(--mono);font-variant-numeric:tabular-nums}
+.tile span{font-size:11px;color:var(--mute)}
+img{max-width:100%;display:block;border:1px solid var(--line);border-radius:6px;background:#fff}
+.answer{border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:6px;padding:10px 12px}
+.md p{margin:0 0 8px}.md ul{margin:0 0 8px;padding-left:18px}.md h3{font-size:14px;margin:10px 0 4px}
+.md code{font-size:12px;background:var(--panel);padding:1px 4px;border-radius:3px}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;font-size:12.5px;font-variant-numeric:tabular-nums;margin:0 0 10px;white-space:nowrap}
+th,td{border:1px solid var(--line);padding:4px 8px;text-align:left}
+th{background:var(--panel);font-weight:600}
+.req{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;align-items:center;font:12px var(--mono)}
+.bar{display:flex;height:14px;gap:1px}
+.bar i{display:block;height:100%;border-radius:2px}
+.bar .in{background:var(--out)}.bar .o{background:var(--accent)}
+.barlab{color:var(--mute);white-space:nowrap;margin-left:6px}
+.trace{display:flex;flex-direction:column;gap:6px}
+.reqhead{font:11px var(--mono);color:var(--mute);margin-top:8px;display:flex;gap:8px;align-items:center}
+.reqhead::after{content:"";flex:1;height:1px;background:var(--line)}
+.step{border:1px solid var(--line);border-left:4px solid var(--k);border-radius:6px;background:var(--bg)}
+.step summary{cursor:pointer;padding:7px 10px;display:flex;gap:8px;align-items:baseline;list-style:none}
+.step summary::-webkit-details-marker{display:none}
+.step .n{font:11px var(--mono);color:var(--mute);min-width:20px}
+.step .k{font:600 11px var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--k);white-space:nowrap}
+.step .h{font:12px var(--mono);color:var(--mute);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.step[open] .h{white-space:normal}
+.step .body{padding:0 10px 10px}
+pre{margin:0;font-size:11.5px;line-height:1.5;background:var(--panel);border-radius:4px;padding:8px 10px;overflow:auto;max-height:420px;white-space:pre;tab-size:2}
+pre.wrap{white-space:pre-wrap;word-break:break-word}
+pre.err{color:var(--accent)}
+.sub{font:11px var(--mono);color:var(--mute);margin:8px 0 3px}
+.memfile{border:1px solid var(--line);border-left:4px solid var(--mem);border-radius:6px;padding:8px 10px}
+.tools{display:flex;gap:8px;font-size:12px}
+.tools button{font:12px var(--sans);background:none;border:1px solid var(--line);color:var(--ink);border-radius:5px;padding:4px 8px;cursor:pointer}
+
+.composer{display:flex;flex-direction:column;gap:8px;border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--panel)}
+.composer .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.composer select,.composer textarea,.composer input[type=text],.composer input[type=password]{font:14px var(--sans);color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px}
+.composer select{flex:1;min-width:140px}
+.composer textarea{width:100%;min-height:64px;resize:vertical}
+.composer label{font-size:12px;color:var(--mute)}
+.filebtn{font:12px var(--sans);border:1px dashed var(--mute);border-radius:6px;padding:8px 10px;cursor:pointer;color:var(--ink)}
+.filebtn input{display:none}
+#ask{font:600 14px var(--sans);background:var(--accent);color:#fff;border:0;border-radius:6px;padding:10px 18px;cursor:pointer}
+#ask:disabled{opacity:.5;cursor:default}
+.ideas{display:flex;gap:6px;flex-wrap:wrap}
+.ideas button{font:12px var(--sans);border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:999px;padding:5px 10px;cursor:pointer}
+.msg{font-size:13px;color:var(--accent)}
+.runs{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}
+.runs button{white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis;flex:none}
+.live{display:flex;gap:10px;align-items:center;border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:6px;padding:9px 12px;font:13px var(--mono)}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--accent);animation:pulse 1s infinite}
+@keyframes pulse{50%{opacity:.25}}
+@media (prefers-reduced-motion: reduce){.dot{animation:none}}
+.errbox{border:1px solid var(--accent);border-radius:6px;padding:9px 12px;color:var(--accent);font:13px var(--mono);white-space:pre-wrap;word-break:break-word}
+.strip a.new{outline:2px solid var(--ink);outline-offset:1px}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+  <section id="gate" class="composer" hidden>
+    <label for="pass">Passcode</label>
+    <div class="row"><input id="pass" type="password" autocomplete="current-password" style="flex:1"><button id="passgo" class="filebtn" style="border-style:solid">Unlock</button></div>
+  </section>
+  <form id="composer" class="composer">
+    <div class="row">
+      <select id="dataset" aria-label="Dataset"></select>
+      <label class="filebtn"><input id="file" type="file" accept=".csv,.tsv,.txt,.json,.xlsx,.parquet"><span id="filelab">Upload a file</span></label>
+    </div>
+    <textarea id="q" placeholder="Ask a question about the data" aria-label="Question"></textarea>
+    <div class="ideas" id="ideas"></div>
+    <div class="row" style="justify-content:space-between">
+      <label id="fuwrap" hidden><input id="followup" type="checkbox" checked> Follow-up to the run on screen (same sandbox)</label>
+      <span class="msg" id="msg"></span>
+      <button id="ask" type="submit">Ask the agent</button>
+    </div>
+  </form>
+  <div class="runs" id="runs" role="group" aria-label="Runs"></div>
+  <div id="run" style="display:flex;flex-direction:column;gap:14px"></div>
+</main>
+<script>
+const KIND = {code:['Code','--code'],output:['Output','--out'],advisor_call:['Advisor','--adv'],advisor_result:['Advisor','--adv'],
+              memory:['Memory','--mem'],text:['Agent says','--txt'],thinking:['Thinking','--out']};
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const num = n => Number(n).toLocaleString('en-US');
+
+function inline(s){
+  return esc(s).replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');
+}
+function md(src){                       // small markdown renderer: headings, lists, tables, paragraphs
+  const L = src.split('\n'); let h = '', i = 0;
+  while(i < L.length){
+    const l = L[i];
+    if(/^\s*\|.*\|\s*$/.test(l) && i+1 < L.length && /^\s*\|[\s:|-]+\|\s*$/.test(L[i+1])){
+      const row = r => r.trim().replace(/^\||\|$/g,'').split('|').map(c => c.trim());
+      h += '<div class="scroll"><table><thead><tr>' + row(l).map(c => `<th>${inline(c)}</th>`).join('') + '</tr></thead><tbody>';
+      i += 2;
+      while(i < L.length && /^\s*\|.*\|\s*$/.test(L[i])){ h += '<tr>' + row(L[i]).map(c => `<td>${inline(c)}</td>`).join('') + '</tr>'; i++; }
+      h += '</tbody></table></div>'; continue;
+    }
+    if(/^#{1,4}\s/.test(l)){ h += `<h3>${inline(l.replace(/^#+\s/,''))}</h3>`; i++; continue; }
+    if(/^\s*([-*]|\d+\.)\s/.test(l)){
+      h += '<ul>';
+      while(i < L.length && /^\s*([-*]|\d+\.)\s/.test(L[i])){ h += `<li>${inline(L[i].replace(/^\s*([-*]|\d+\.)\s/,''))}</li>`; i++; }
+      h += '</ul>'; continue;
+    }
+    if(!l.trim()){ i++; continue; }
+    let p = [];
+    while(i < L.length && L[i].trim() && !/^\s*\|.*\|\s*$/.test(L[i]) && !/^#{1,4}\s/.test(L[i]) && !/^\s*([-*]|\d+\.)\s/.test(L[i])){ p.push(L[i]); i++; }
+    h += `<p>${inline(p.join(' '))}</p>`;
+  }
+  return h;
+}
+
+function stepHTML(e, n){
+  const [label, v] = KIND[e.kind] || [e.kind,'--out'];
+  let head = '', body = '', open = false;
+  if(e.kind === 'code'){ head = e.code.split('\n')[0].slice(0,140); body = `<pre>${esc(e.code)}</pre>`; }
+  else if(e.kind === 'output'){
+    const f = e.files || [];
+    head = (e.rc === 0 || e.rc == null ? '' : `exit ${e.rc} · `) + (f.length ? f.map(x => x.name).join(', ') + ' · ' : '') + (e.stdout || e.stderr || '').trim().split('\n')[0].slice(0,120);
+    body = (e.stdout ? `<pre>${esc(e.stdout)}</pre>` : '') + (e.stderr ? `<div class="sub">stderr</div><pre class="err">${esc(e.stderr)}</pre>` : '')
+         + f.map(x => /\.(png|jpe?g|gif|svg)$/i.test(x.name) ? `<div class="sub">${esc(x.name)}</div><img alt="${esc(x.name)}" src="data:image/${x.name.split('.').pop()};base64,${x.b64}">` : `<div class="sub">file: ${esc(x.name)}</div>`).join('');
+    open = f.length > 0;
+  }
+  else if(e.kind === 'advisor_call'){ head = `Sonnet asks ${esc(e.model)} to check the method`; body = `<pre class="wrap">The advisor reads the whole conversation, so the call has no arguments.</pre>`; }
+  else if(e.kind === 'advisor_result'){ head = e.text ? e.text.slice(0,140) : `${e.result_type}: encrypted, only the executor model can read it`;
+    body = `<pre class="wrap">${esc(e.text || 'The API returns this advice encrypted (' + e.result_type + '). Your code passes the block back unchanged. Its effect shows in the steps that follow.')}</pre>`; }
+  else if(e.kind === 'memory'){
+    const inp = e.input || {};
+    head = `${inp.command} ${inp.path || ''}`;
+    const content = inp.file_text ?? inp.new_str ?? inp.insert_text;
+    body = (content ? `<div class="sub">written</div><pre class="wrap">${esc(content)}</pre>` : '')
+         + (inp.old_str ? `<div class="sub">replaced</div><pre class="wrap">${esc(inp.old_str)}</pre>` : '')
+         + (e.result ? `<div class="sub">result</div><pre class="wrap">${esc(e.result)}</pre>` : '');
+    open = inp.command === 'view' && /\.md/.test(inp.path || '');
+  }
+  else if(e.kind === 'text'){ head = e.text.slice(0,140); body = `<div class="md">${md(e.text)}</div>`; }
+  else { head = (e.text || '').slice(0,140); body = `<pre class="wrap">${esc(e.text || '')}</pre>`; }
+  return `<details class="step" id="s${n}" style="--k:var(${v})" ${open ? 'open' : ''}><summary><span class="n">${n}</span><span class="k">${label}</span><span class="h">${esc(head)}</span></summary><div class="body">${body}</div></details>`;
+}
+
+
+const $ = id => document.getElementById(id);
+let PASS = ''; try { PASS = localStorage.getItem('ds_pass') || ''; } catch(e){}
+let STATE = {runs:[], datasets:[]}, CUR = null, RUN = null, painted = 0, timer = null;
+const IDEAS = ['Profile this dataset and tell me the 3 most interesting things', 'Did the treatment win? Should we ship it?', 'What drives conversion? Rank the factors', 'Find anything suspicious in this data'];
+
+async function api(path, opts = {}){
+  const r = await fetch(path, {...opts, headers: {...(opts.headers || {}), 'X-Passcode': PASS}});
+  if(r.status === 401){ $('gate').hidden = false; throw new Error('passcode'); }
+  const j = await r.json().catch(() => ({error: 'Server returned ' + r.status}));
+  if(!r.ok) throw new Error(j.error || ('Server returned ' + r.status));
+  return j;
+}
+
+async function loadState(pick){
+  STATE = await api('/api/state');
+  $('gate').hidden = true;
+  const sel = $('dataset'), keep = sel.value;
+  sel.innerHTML = STATE.datasets.map(d => `<option>${esc(d)}</option>`).join('');
+  if(STATE.datasets.includes(keep)) sel.value = keep;
+  paintRuns();
+  if(pick) select(pick); else if(!CUR && STATE.runs.length) select(STATE.runs[STATE.runs.length - 1].id);
+}
+function paintRuns(){
+  $('runs').innerHTML = STATE.runs.slice().reverse().map(r => `<button aria-pressed="${r.id === CUR}" data-id="${r.id}" title="${esc(r.question)}">${r.status === 'running' ? '● ' : r.status === 'error' ? '✕ ' : ''}${esc(r.question)}</button>`).join('');
+  document.querySelectorAll('#runs button').forEach(b => b.onclick = () => select(b.dataset.id));
+}
+function select(id){
+  CUR = id; RUN = null; painted = 0; clearTimeout(timer);
+  $('run').innerHTML = `<div id="head"></div><div id="status"></div><section><h2>Every step, in order (tap a block)</h2><div class="strip" id="strip"></div><div class="legend" id="legend"></div></section><section class="tiles" id="tiles"></section><div id="chart"></div><div id="answer"></div><div id="tokens"></div><div id="mem"></div><section><div style="display:flex;justify-content:space-between;align-items:center"><h2 id="tracehead">Full trace</h2><div class="tools"><button id="openall" type="button">Open all</button><button id="closeall" type="button">Close all</button></div></div><div class="trace" id="trace"></div></section><div id="setup"></div>`;
+  $('openall').onclick = () => document.querySelectorAll('#trace details').forEach(d => d.open = true);
+  $('closeall').onclick = () => document.querySelectorAll('#trace details').forEach(d => d.open = false);
+  paintRuns(); poll();
+}
+async function poll(){
+  const id = CUR;
+  try {
+    const d = await api(`/api/runs/${id}?after=${RUN ? RUN.events.length : 0}`);
+    if(id !== CUR) return;
+    if(RUN){ d.events = RUN.events.concat(d.events); }
+    RUN = d; paint();
+    const s = STATE.runs.find(r => r.id === id); if(s && s.status !== d.status){ s.status = d.status; paintRuns(); }
+    if(d.status === 'running') timer = setTimeout(poll, 1000);
+  } catch(e){ if(e.message !== 'passcode' && id === CUR) timer = setTimeout(poll, 3000); }
+}
+
+function paint(){
+  const r = RUN, E = r.events, Q = r.requests || [], live = r.status === 'running';
+  const count = k => E.filter(e => e.kind === k).length;
+  const tin = Q.reduce((a,q) => a + q.in, 0), tout = Q.reduce((a,q) => a + q.out, 0);
+  const charts = E.flatMap(e => (e.files || []).filter(f => f.b64 && /\.(png|jpe?g)$/i.test(f.name)));
+  const chart = charts[charts.length - 1];
+  const texts = E.filter(e => e.kind === 'text'); const final = !live ? texts[texts.length - 1] : null;
+  const memRead = E.some(e => e.kind === 'memory' && e.input.command === 'view' && /\.md/.test(e.input.path || ''));
+  $('head').innerHTML = `<h1>${esc(r.question)}</h1><div class="meta" style="margin-top:8px"><span class="chip">${esc(r.dataset)} · ${num(r.rows)} rows</span><span class="chip">${esc(r.model)}</span><span class="chip">advisor ${esc(r.advisor)}</span><span class="chip">effort ${esc(r.effort)}</span><span class="chip">${esc(r.started)}</span>${r.followup ? '<span class="chip">follow-up, same sandbox</span>' : ''}${memRead ? '<span class="chip">read memory from an earlier run</span>' : ''}</div>`;
+  $('status').innerHTML = live ? `<div class="live"><span class="dot"></span><span>${esc(r.activity || 'working')} · step ${E.length} · ${Math.round(r.elapsed || 0)}s</span></div>` : r.status === 'error' ? `<div class="errbox">The run stopped with an error.\n${esc(r.error)}</div>` : '';
+  $('strip').innerHTML = E.map((e,i) => `<a href="#s${i+1}" data-s="${i+1}" class="${live && i === E.length-1 ? 'new' : ''}" title="${i+1} ${(KIND[e.kind]||[e.kind])[0]}" aria-label="Step ${i+1} ${(KIND[e.kind]||[e.kind])[0]}" style="background:var(${(KIND[e.kind]||['','--out'])[1]})"></a>`).join('') || '<span style="color:var(--mute);font-size:12px">No steps yet</span>';
+  document.querySelectorAll('#strip a').forEach(a => a.onclick = ev => { ev.preventDefault(); const d = $('s' + a.dataset.s); if(!d) return; d.open = true; d.scrollIntoView({behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block:'start'}); });
+  $('legend').innerHTML = `<span><i style="background:var(--code)"></i>code ${count('code')}</span><span><i style="background:var(--out)"></i>output ${count('output')}</span><span><i style="background:var(--adv)"></i>advisor ${count('advisor_call')}</span><span><i style="background:var(--mem)"></i>memory ${count('memory')}</span><span><i style="background:var(--txt)"></i>agent text ${count('text')}</span>`;
+  $('tiles').innerHTML = [[Math.round(r.elapsed || 0) + 's','total time'],[Q.length + (live ? '+' : ''),'API requests'],[count('code'),'code steps'],[count('advisor_call'),'advisor calls'],[count('memory'),'memory ops'],[num(tin),'input tokens'],[num(tout),'output tokens']].map(([b,s]) => `<div class="tile"><b>${b}</b><span>${s}</span></div>`).join('');
+  const ch = chart ? `<section><h2>Chart the agent made · ${esc(chart.name)}</h2><img alt="Chart made by the agent" src="data:image/png;base64,${chart.b64}"></section>` : '';
+  if($('chart').dataset.k !== (chart ? chart.name + chart.b64.length : '')){ $('chart').innerHTML = ch; $('chart').dataset.k = chart ? chart.name + chart.b64.length : ''; }
+  $('answer').innerHTML = final ? `<section><h2>Final answer</h2><div class="answer md">${md(final.text)}</div></section>` : '';
+  const byModel = {}; Q.forEach(q => (q.per_model || []).forEach(m => { byModel[m.model] = byModel[m.model] || {in:0,out:0}; byModel[m.model].in += m.in; byModel[m.model].out += m.out; }));
+  const maxTok = Math.max(1, ...Q.map(q => q.in + q.out));
+  $('tokens').innerHTML = Q.length ? `<section><h2>Tokens per API request (grey input, red output)</h2><div class="req">${Q.map((q,i) => `<span>#${i+1}</span><div style="display:flex;align-items:center"><div class="bar" style="width:${Math.max(4,(q.in+q.out)/maxTok*50)}%"><i class="in" style="flex:${q.in}"></i><i class="o" style="flex:${Math.max(q.out,1)}"></i></div><span class="barlab">${num(q.in)} / ${num(q.out)} · ${q.secs}s</span></div>`).join('')}</div>${Object.keys(byModel).length ? `<div class="scroll" style="margin-top:10px"><table><thead><tr><th>Billed model</th><th>Input</th><th>Output</th></tr></thead><tbody>${Object.entries(byModel).map(([m,v]) => `<tr><td>${esc(m)}</td><td>${num(v.in)}</td><td>${num(v.out)}</td></tr>`).join('')}</tbody></table></div>` : ''}</section>` : '';
+  const mems = r.memory_files || {};
+  $('mem').innerHTML = Object.keys(mems).length ? `<section><h2>Memory on disk</h2>${Object.entries(mems).map(([p,t]) => `<details class="step" style="--k:var(--mem);margin-bottom:6px"><summary><span class="k">Memory file</span><span class="h">${esc(p)}</span></summary><div class="body md">${md(t || '')}</div></details>`).join('')}</section>` : '';
+  $('tracehead').textContent = `Full trace · ${E.length} steps`;
+  const tr = $('trace');
+  for(let i = painted; i < E.length; i++){
+    const e = E[i];
+    if(i === 0 || E[i-1].req !== e.req) tr.insertAdjacentHTML('beforeend', `<div class="reqhead" id="rq${e.req}">API request ${e.req}</div>`);
+    tr.insertAdjacentHTML('beforeend', stepHTML(e, i+1));
+  }
+  E.forEach((e,i) => { if(e.kind === 'memory' && e.result && i < painted){ const d = $('s' + (i+1)); if(d && !d.dataset.r){ const o = d.open; d.outerHTML = stepHTML(e, i+1); const n = $('s' + (i+1)); n.dataset.r = 1; n.open = o; } } });
+  painted = E.length;
+  Q.forEach((q,i) => { const h = $('rq' + (i+1)); if(h) h.textContent = `API request ${i+1} · ${q.secs}s · stop: ${q.stop}`; });
+  if(!$('setup').innerHTML) $('setup').innerHTML = `<section><h2>Setup</h2><details class="step" style="--k:var(--out)"><summary><span class="k">System prompt</span><span class="h">the agent's instructions</span></summary><div class="body"><pre class="wrap">${esc(r.system)}</pre></div></details><details class="step" style="--k:var(--out);margin-top:6px"><summary><span class="k">Dataset</span><span class="h">${esc(r.header)}</span></summary><div class="body"><pre class="wrap">${esc(r.dataset)} · ${num(r.rows)} rows · ${num(r.bytes)} bytes\ncolumns: ${esc(r.header)}</pre></div></details></section>`;
+  $('fuwrap').hidden = !(r.session_alive && !live);
+  $('ask').disabled = live;
+}
+
+$('ideas').innerHTML = IDEAS.map(t => `<button type="button">${esc(t)}</button>`).join('');
+document.querySelectorAll('#ideas button').forEach(b => b.onclick = () => { $('q').value = b.textContent; $('q').focus(); });
+$('file').onchange = () => { const f = $('file').files[0]; $('filelab').textContent = f ? f.name : 'Upload a file'; if(f) $('followup').checked = false; };
+$('dataset').onchange = () => { $('followup').checked = false; };
+$('composer').onsubmit = async ev => {
+  ev.preventDefault(); $('msg').textContent = '';
+  const fd = new FormData(); fd.append('question', $('q').value);
+  const f = $('file').files[0];
+  if(!$('fuwrap').hidden && $('followup').checked && RUN && !f) fd.append('session_id', RUN.session_id);
+  if(f) fd.append('file', f); else fd.append('dataset', $('dataset').value);
+  $('ask').disabled = true; $('msg').textContent = 'Uploading the dataset...';
+  try {
+    const j = await api('/api/ask', {method: 'POST', body: fd});
+    $('q').value = ''; $('file').value = ''; $('filelab').textContent = 'Upload a file'; $('msg').textContent = '';
+    await loadState(j.run_id);
+  } catch(e){ $('msg').textContent = e.message === 'passcode' ? 'Enter the passcode first.' : e.message; $('ask').disabled = false; }
+};
+$('passgo').onclick = () => { PASS = $('pass').value; try { localStorage.setItem('ds_pass', PASS); } catch(e){} loadState().catch(() => {}); };
+$('pass').onkeydown = e => { if(e.key === 'Enter'){ e.preventDefault(); $('passgo').click(); } };
+loadState().catch(e => { if(e.message !== 'passcode') $('msg').textContent = e.message; });
+</script>
+</body>
+</html>
